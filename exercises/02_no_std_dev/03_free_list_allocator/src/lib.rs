@@ -119,7 +119,55 @@ unsafe impl GlobalAlloc for FreeListAllocator {
         // TODO: Step 2 — no suitable block in free_list, allocate from bump region
         //
         // Same logic as 02_bump_allocator's alloc
-        todo!()
+
+        let mut curr = self.free_list_head();
+        let mut prev: *mut FreeBlock = null_mut();
+
+        while !curr.is_null() {
+            let curr_addr = curr as usize;
+            let block_size = (*curr).size;
+
+            if curr_addr % align == 0 && block_size >= size {
+                if prev.is_null() {
+                    self.set_free_list_head((*curr).next);
+                } else {
+                    (*prev).next = (*curr).next;
+                }
+
+                return curr as *mut u8;
+            }
+            
+            prev = curr;
+            curr = (*curr).next;
+        }
+
+        let mut current_next = self.bump_next.load(core::sync::atomic::Ordering::SeqCst);
+
+        loop {
+            let aligned = (current_next + align - 1) & !(align - 1);
+
+            let alloc_end = match current_next.checked_add(size) {
+                Some(end) => end,
+                None => return null_mut()
+            };
+
+            if alloc_end > self.heap_end {
+                return null_mut();
+            }
+
+            match self.bump_next.compare_exchange(
+                current_next, 
+                alloc_end, 
+                core::sync::atomic::Ordering::SeqCst, 
+                core::sync::atomic::Ordering::SeqCst) {
+                Ok(_) => {
+                    return aligned as *mut u8;
+                },
+                Err(new_next) => {
+                    current_next = new_next;
+                }
+            }
+        }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -131,7 +179,15 @@ unsafe impl GlobalAlloc for FreeListAllocator {
         // 1. Cast ptr to *mut FreeBlock
         // 2. Write FreeBlock { size, next: current list head }
         // 3. Update free_list head to ptr
-        todo!()
+
+        let free_block_ptr = ptr as *mut FreeBlock;
+
+        free_block_ptr.write(FreeBlock {
+            size,
+            next: self.free_list_head(),
+        });
+
+        self.set_free_list_head(free_block_ptr);
     }
 }
 

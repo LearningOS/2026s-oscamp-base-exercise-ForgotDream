@@ -19,7 +19,21 @@ pub async fn producer_consumer(items: Vec<String>) -> Vec<String> {
     // TODO: Spawn producer task: iterate through items, send each one
     // TODO: Spawn consumer task: loop recv until channel closes, collect results
     // TODO: Wait for consumer to complete and return results
-    todo!()
+
+    let (s, mut r) = mpsc::channel(items.len().max(1));
+
+    for item in items {
+        s.send(item).await.unwrap();
+    }
+
+    let mut ret = vec![];
+    
+    loop {
+        match r.recv().await {
+            Some(item) => ret.push(item),
+            None => return ret
+        }
+    }
 }
 
 /// Fan‑in pattern: multiple producers, one consumer.
@@ -31,7 +45,24 @@ pub async fn fan_in(n_producers: usize) -> Vec<String> {
     //       Each sends format!("producer {id}: message")
     // TODO: Drop the original sender (important! otherwise channel won't close)
     // TODO: Consumer loops receiving, collects and sorts
-    todo!()
+
+    let (s, mut r) = mpsc::channel(n_producers);
+
+    for id in 0..n_producers {
+        let ith_s = s.clone();
+        ith_s.send(format!("producer {id}: message")).await.unwrap();
+    }
+
+    drop(s);
+
+    let mut ret = vec![];
+
+    loop {
+        match r.recv().await {
+            Some(item) => ret.push(item),
+            None => return ret
+        }
+    }
 }
 
 #[cfg(test)]
